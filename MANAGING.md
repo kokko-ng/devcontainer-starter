@@ -152,10 +152,12 @@ This starter is disk-hungry by design:
 |---|---|
 | Each project's `vsc-*` devcontainer image | 5-6 GB |
 | Each rebuild, leaving the old image as a dangling `<none>` | 5-6 GB again |
-| `docker-in-docker` nested image store (`dind-var-lib-docker-*` volume) | grows unbounded |
 | Python/Node/Playwright layers | ~1-2 GB |
+| `docker-in-docker` nested image store, **if you enable it** | grows unbounded |
 
 Three projects and a handful of rebuilds is comfortably 50 GB. Rebuilds are the biggest trap: `dcur` (`--remove-existing-container`) removes the *container* but leaves the old *image* behind, untagged and invisible unless you look for it.
+
+Docker-in-Docker is disabled by default for this reason — its store lives in a `dind-var-lib-docker-*` volume that survives container removal and is invisible to `docker system df`. If you uncomment the feature, prune the nested store from inside the container periodically (`docker system prune -a`).
 
 ### Check disk usage
 
@@ -163,7 +165,8 @@ Three projects and a handful of rebuilds is comfortably 50 GB. Rebuilds are the 
 # What the VM's real disk looks like -- the number that actually matters
 colima ssh -- df -h /
 
-# What Docker thinks it is using (does NOT include the dind nested store)
+# What Docker thinks it is using. Note this does NOT include the nested store
+# of any container running the docker-in-docker feature.
 docker system df
 ```
 
@@ -189,13 +192,22 @@ docker container prune
 docker system prune -a --volumes   # DESTRUCTIVE -- avoid
 ```
 
-`--volumes` deletes the named volumes this starter depends on:
+`--volumes` deletes named volumes holding local state you probably did not mean to delete:
 
-- `dind-var-lib-docker-*` — the docker-in-docker image store
 - `claude-code-config-*`, `claude-code-bashhistory-*` — Claude Code settings and shell history
 - `vscode` — VS Code server and extensions
+- `dind-var-lib-docker-*` — the docker-in-docker image store, if you enabled that feature
 
-Losing these does not destroy source code, but it silently discards local state you did not intend to delete. Prune images, not volumes.
+Losing these does not destroy source code, but it is a silent loss. Prune images, not volumes.
+
+**Leftover `dind-*` volumes:** if you previously ran with docker-in-docker enabled, its volumes are still on disk and are now orphaned — nothing references them. They are safe to remove, and are often several GB each:
+
+```bash
+docker volume ls --filter name=dind-var-lib-docker
+docker volume rm <name>        # or: docker volume prune  (removes ALL unused volumes)
+```
+
+Prefer removing them by name. `docker volume prune` also takes the Claude Code and vscode volumes above if no container currently references them.
 
 ### When the disk is already full
 

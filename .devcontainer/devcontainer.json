@@ -16,7 +16,16 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "20"
     },
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    // Docker-in-Docker is deliberately NOT enabled. It runs a second Docker
+    // daemon whose image store lives in a named volume that survives container
+    // removal and is not visible to `docker system df`, so it grows unbounded
+    // until the Colima VM's disk fills. Nothing in this starter needs it, and
+    // cloud builds (`az acr build`) do not either.
+    //
+    // Uncomment ONLY if you need to build/run containers inside the
+    // devcontainer (compose, Testcontainers), and see MANAGING.md for the
+    // disk cost you are taking on:
+    // "ghcr.io/devcontainers/features/docker-in-docker:2": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/common-utils:2": {
       "installZsh": true,
