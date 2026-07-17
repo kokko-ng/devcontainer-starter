@@ -152,12 +152,16 @@ This starter is disk-hungry by design:
 |---|---|
 | Each project's `vsc-*` devcontainer image | 5-6 GB |
 | Each rebuild, leaving the old image as a dangling `<none>` | 5-6 GB again |
+| `docker-in-docker` nested image store (`dind-var-lib-docker-*` volume) | grows unbounded |
 | Python/Node/Playwright layers | ~1-2 GB |
-| `docker-in-docker` nested image store, **if you enable it** | grows unbounded |
 
 Three projects and a handful of rebuilds is comfortably 50 GB. Rebuilds are the biggest trap: `dcur` (`--remove-existing-container`) removes the *container* but leaves the old *image* behind, untagged and invisible unless you look for it.
 
-Docker-in-Docker is disabled by default for this reason — its store lives in a `dind-var-lib-docker-*` volume that survives container removal and is invisible to `docker system df`. If you uncomment the feature, prune the nested store from inside the container periodically (`docker system prune -a`).
+The `docker-in-docker` store is the subtle one: it is a **named volume**, so it survives container removal, `docker system df` does not count it, and `docker image prune` on the host does not touch it. Prune it from **inside** each devcontainer:
+
+```bash
+docker system prune -a     # run INSIDE the devcontainer
+```
 
 ### Check disk usage
 
@@ -165,9 +169,12 @@ Docker-in-Docker is disabled by default for this reason — its store lives in a
 # What the VM's real disk looks like -- the number that actually matters
 colima ssh -- df -h /
 
-# What Docker thinks it is using. Note this does NOT include the nested store
-# of any container running the docker-in-docker feature.
+# What Docker thinks it is using. This does NOT include the docker-in-docker
+# nested stores -- see below for those.
 docker system df
+
+# How big each devcontainer's nested docker-in-docker store has grown
+docker system df -v | grep dind-var-lib-docker
 ```
 
 The container build prints a warning automatically once the VM disk passes 80%.
@@ -194,20 +201,38 @@ docker system prune -a --volumes   # DESTRUCTIVE -- avoid
 
 `--volumes` deletes named volumes holding local state you probably did not mean to delete:
 
+- `dind-var-lib-docker-*` — a devcontainer's nested Docker image store
 - `claude-code-config-*`, `claude-code-bashhistory-*` — Claude Code settings and shell history
 - `vscode` — VS Code server and extensions
-- `dind-var-lib-docker-*` — the docker-in-docker image store, if you enabled that feature
 
 Losing these does not destroy source code, but it is a silent loss. Prune images, not volumes.
 
-**Leftover `dind-*` volumes:** if you previously ran with docker-in-docker enabled, its volumes are still on disk and are now orphaned — nothing references them. They are safe to remove, and are often several GB each:
+### Retiring a project's dind volume
+
+A `dind-var-lib-docker-*` volume stays tied to its container for as long as that container exists — **even when stopped**. A stopped devcontainer you have not opened in months still owns its volume, so a multi-GB `dind-*` volume is not evidence of anything left over.
+
+Before assuming a volume is garbage, check the `LINKS` column — `0` means nothing references it, `1` means a container still does:
 
 ```bash
-docker volume ls --filter name=dind-var-lib-docker
-docker volume rm <name>        # or: docker volume prune  (removes ALL unused volumes)
+docker system df -v | grep -E "VOLUME NAME|dind-var-lib-docker"
 ```
 
-Prefer removing them by name. `docker volume prune` also takes the Claude Code and vscode volumes above if no container currently references them.
+```
+VOLUME NAME                          LINKS     SIZE
+dind-var-lib-docker-051bsgre...      1         3.897GB    <- in use, leave alone
+dind-var-lib-docker-1iqoip1a...      1         470MB      <- in use, leave alone
+```
+
+A dind volume is only genuinely reclaimable once its container is gone. To retire a project:
+
+```bash
+docker rm <container>                          # remove the container first
+docker volume rm dind-var-lib-docker-<hash>    # then its now-unreferenced volume
+```
+
+Remove them **by name**. `docker volume prune` takes every unreferenced volume, including the Claude Code and vscode ones above.
+
+Docker will refuse to remove a volume an existing container still references, so a mistake here fails loudly rather than destroying anything — but do not rely on that as the check.
 
 ### When the disk is already full
 

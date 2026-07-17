@@ -15,8 +15,9 @@ A portable development container for FastAPI + Vue projects, designed to run on 
 | GitHub Copilot CLI | `copilot` binary, installed via `npm i -g @github/copilot` |
 | zsh + oh-my-zsh | Shell with autosuggestions and syntax highlighting |
 | Playwright CLI + Chromium | Browser automation for coding agents (`playwright-cli`) |
+| Docker-in-Docker | Container builds inside the devcontainer |
 
-Docker-in-Docker is **not** enabled by default — it fills the Colima VM's disk over time and most projects do not need it. See [MANAGING.md](MANAGING.md#disk-management) if you need to turn it on.
+Docker-in-Docker keeps its own image store in a volume that grows unnoticed — `docker system df` does not count it. Prune it periodically from inside the container; see [Disk management](MANAGING.md#disk-management).
 
 Ports `8000` (FastAPI) and `5173` (Vite) are forwarded automatically when opened in VS Code.
 

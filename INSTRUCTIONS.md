@@ -113,7 +113,7 @@ colima start --cpu 8 --memory 16 --disk 150
 
 Adjust `--cpu` and `--memory` to suit your machine. 4 CPUs and 8 GB RAM is a workable baseline for a single FastAPI + Vue project with hot reload; 8 and 16 are comfortable if you run more than one container or build images.
 
-**Size `--disk` generously from the start.** Each devcontainer image built from this starter is 5-6 GB and every rebuild leaves the previous image behind. A 60 GB disk fills up faster than expected, and a full disk takes the Docker daemon down in a way that is hard to diagnose (see [Disk management](MANAGING.md#disk-management)).
+**Size `--disk` generously from the start.** Each devcontainer image built from this starter is 5-6 GB, every rebuild leaves the previous image behind, and the `docker-in-docker` feature keeps a second, nested image store per container. A 60 GB disk fills up faster than expected, and a full disk takes the Docker daemon down in a way that is hard to diagnose (see [Disk management](MANAGING.md#disk-management)).
 
 Disk is the one setting worth over-provisioning now: the image is sparse, so `--disk 150` only consumes host space as it actually fills, and while Colima can grow a disk later, it cannot shrink one.
 
@@ -249,7 +249,7 @@ The base image (`mcr.microsoft.com/devcontainers/python`) is maintained by Micro
 - **`HOST_USER` ARG** creates a `/Users/<username>` symlink to `/home/vscode` so that macOS absolute paths embedded in Claude plugin configs (e.g. `/Users/<your-mac-user>/.claude/...`) resolve inside the container. The value is auto-injected by `devcontainer.json` from `${localEnv:USER}`, so it matches your host username automatically — no manual edit needed when forking.
 - **Host CA certificates** are copied from `certs/` (populated by `init-host-certs.sh` at build time) so that corporate proxy CAs are trusted without disabling SSL verification.
 
-Additional tools (Node, Azure CLI, GitHub CLI, zsh) are added via **devcontainer features** in `devcontainer.json` rather than the Dockerfile. Features are composable, versioned, and reusable across projects.
+Additional tools (Node, Azure CLI, GitHub CLI, Docker-in-Docker, zsh) are added via **devcontainer features** in `devcontainer.json` rather than the Dockerfile. Features are composable, versioned, and reusable across projects.
 
 ### devcontainer.json
 
@@ -398,31 +398,36 @@ sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
 
 Or use the `DOCKER_HOST` environment variable as described in the [Colima section](#install-and-configure-colima).
 
-### Docker inside the container
+### Docker-in-Docker vs Docker-outside-of-Docker
 
-**Not enabled by default.** Nothing in this starter needs a Docker daemon inside the container, and cloud builds (`az acr build`) do not either — they upload a build context and build remotely.
+The devcontainer uses the **Docker-in-Docker** feature, which runs a separate Docker daemon inside the container. This is the safest isolation model: the container cannot touch the host's daemon, and images built inside it are not shared with the host's Docker cache.
 
-The `docker-in-docker` feature was removed because its storage is effectively invisible and unbounded. It runs a second Docker daemon whose image store lives in a **named volume** (`dind-var-lib-docker-*`). That volume:
+**Know where its storage actually goes.** The nested daemon's images live in a **named volume** (`dind-var-lib-docker-*`), one per container. That volume:
 
-- **survives container removal** — rebuilding with `dcur` does not reclaim it
-- is **not counted by `docker system df`**, which only reports the outer daemon
-- is **not reclaimed by `docker image prune`**
+- **survives container removal** — rebuilding with `dcur` does *not* reclaim it
+- is **not counted by `docker system df`**, which reports only the outer daemon
+- is **not reclaimed by `docker image prune`** on the host
 
-So it accumulates silently until the Colima VM's disk fills, which takes the Docker daemon down in a way that is hard to diagnose. See [Disk management](MANAGING.md#disk-management).
+So it grows unnoticed until the Colima VM's disk fills, which takes Docker down in a way that is hard to diagnose. This is a real cost, not a theoretical one — but it is manageable if you know it is there. See [Disk management](MANAGING.md#disk-management).
 
-If you genuinely need to build or run containers inside the devcontainer (Docker Compose, Testcontainers), uncomment the feature in `devcontainer.json`:
-
-```jsonc
-"ghcr.io/devcontainers/features/docker-in-docker:2": {}
-```
-
-Then budget for the disk cost, and prune the nested store periodically from inside the container:
+Keeping it in check:
 
 ```bash
-docker system prune -a     # run INSIDE the devcontainer, clears the nested store
+# INSIDE the devcontainer -- clears the nested store
+docker system prune -a
+
+# ON THE HOST -- how big has a nested store become?
+docker system df -v | grep dind-var-lib-docker
 ```
 
-**Alternative: share the host's Docker socket** (Docker-outside-of-Docker). Containers you start are siblings on the Colima daemon rather than nested, so there is no second image store and no hidden volume — images are shared with the host cache and prune normally. The trade-off is weaker isolation: the container gets full control of the host's Docker daemon.
+When you retire a project for good, remove the container *and then* its volume by name — removing the container alone leaves the volume behind:
+
+```bash
+docker rm <container>
+docker volume rm dind-var-lib-docker-<hash>
+```
+
+**Alternative: share the host's Docker socket** (Docker-outside-of-Docker). Containers you start become siblings on the Colima daemon rather than nested, so there is no second image store and no hidden volume — images share the host cache and prune normally. The trade-off is weaker isolation: the container gets full control of the host's Docker daemon.
 
 ```jsonc
 "mounts": [
@@ -508,7 +513,7 @@ When you copy or fork this repo for your own project, no host-specific edits are
 | Frontend directory | `.devcontainer/post-create.sh` | `ui` | Change the `cd ui` line if your frontend is in a different directory |
 | ODBC driver block | `.devcontainer/Dockerfile` | Installs `msodbcsql18` | Remove entirely if you do not use Azure SQL |
 | Azure CLI feature | `.devcontainer/devcontainer.json` | `azure-cli:1` | Remove the feature if you do not use Azure |
-| Docker-in-Docker feature | `.devcontainer/devcontainer.json` | Commented out | Uncomment only if you need Docker inside the container; costs disk (see MANAGING.md) |
+| Docker-in-Docker feature | `.devcontainer/devcontainer.json` | `docker-in-docker:2` | Remove if you never build/run containers inside the devcontainer; it costs disk (see MANAGING.md) |
 | Global Claude instructions | `.devcontainer/config/claude/CLAUDE.md` | Communication and process rules | Rewrite to match your team's conventions |
 
 ### Quick checklist

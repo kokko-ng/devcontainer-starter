@@ -176,7 +176,7 @@ check_vm_disk() {
     echo "    docker image prune -a"
     echo ""
     echo "  Do NOT use 'docker system prune --volumes': it also deletes the"
-    echo "  Claude Code and VS Code state volumes."
+    echo "  docker-in-docker, Claude Code and VS Code state volumes."
     echo ""
     echo "  See MANAGING.md -> Disk management."
     echo ""
