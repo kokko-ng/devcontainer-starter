@@ -47,7 +47,9 @@ brew install colima devcontainer
 brew install --cask ghostty
 
 # 2. Start Colima
-colima start --cpu 4 --memory 8
+# --disk is generous on purpose: devcontainer images are 5-6GB each and
+# Colima can grow a disk but never shrink it. See MANAGING.md.
+colima start --cpu 8 --memory 16 --disk 150
 
 # 3. Clone this repo into your project and open it
 cd your-project

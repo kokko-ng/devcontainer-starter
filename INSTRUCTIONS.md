@@ -108,10 +108,14 @@ brew install colima docker docker-compose
 ### Start Colima
 
 ```bash
-colima start --cpu 4 --memory 8 --disk 60
+colima start --cpu 8 --memory 16 --disk 150
 ```
 
-Adjust `--cpu` and `--memory` to suit your machine. 4 CPUs and 8 GB RAM is a reasonable baseline for a FastAPI + Vue project with hot reload.
+Adjust `--cpu` and `--memory` to suit your machine. 4 CPUs and 8 GB RAM is a workable baseline for a single FastAPI + Vue project with hot reload; 8 and 16 are comfortable if you run more than one container or build images.
+
+**Size `--disk` generously from the start.** Each devcontainer image built from this starter is 5-6 GB, every rebuild leaves the previous image behind, and the `docker-in-docker` feature keeps a second, nested image store. A 60 GB disk fills up faster than expected, and a full disk takes the Docker daemon down in a way that is hard to diagnose (see [Disk management](MANAGING.md#disk-management)).
+
+Disk is the one setting worth over-provisioning now: the image is sparse, so `--disk 150` only consumes host space as it actually fills, and while Colima can grow a disk later, it cannot shrink one.
 
 ### Auto-start at login
 
@@ -125,11 +129,14 @@ brew services start colima
 docker info | head -5
 ```
 
-You should see output referencing the Colima context. If Docker cannot connect, check that Colima is running:
+You should see output referencing the Colima context. If Docker cannot connect, check that Colima is running and that its disk is not full:
 
 ```bash
-colima status
+colima status        # did the VM boot?
+colima ssh -- df -h /   # is the disk full? colima status will NOT tell you
 ```
+
+A healthy `colima status` is not proof that Docker works: the VM can be running normally while the daemon inside it is dead from a full disk. See [Disk management](MANAGING.md#disk-management).
 
 ### Docker socket path
 
@@ -355,10 +362,10 @@ If your project uses a different layout, update these two locations before build
 
 ### `devcontainer up` fails with "Command failed: docker ps"
 
-This means Docker is not reachable — Colima is not running. Start it:
+Docker is not reachable. Usually Colima is simply not running — start it:
 
 ```bash
-colima start --cpu 4 --memory 8 --disk 60
+colima start --cpu 8 --memory 16 --disk 150
 ```
 
 Then retry `devcontainer up`. You can verify Docker is available with:
@@ -372,6 +379,14 @@ To avoid this on every login, enable Colima as a background service:
 ```bash
 brew services start colima
 ```
+
+**If Colima says it is already running and Docker still does not work**, do not stop here assuming the VM is fine — the most likely cause is that the VM's disk is full. Check the disk before anything else:
+
+```bash
+colima ssh -- df -h /
+```
+
+At 100% the Docker daemon is dead even though the VM booted normally, so `colima status` still looks healthy and `colima start` answers `already running, ignoring`. See [Disk management](MANAGING.md#disk-management) for the full symptom list and recovery steps.
 
 ### Colima socket path in CI or other tools
 
